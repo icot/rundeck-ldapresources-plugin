@@ -15,7 +15,9 @@ import com.dtolabs.rundeck.plugins.util.DescriptionBuilder;
 
 import org.apache.directory.api.ldap.model.cursor.CursorException;
 import org.apache.directory.api.ldap.model.cursor.EntryCursor;
+import org.apache.directory.api.ldap.model.entry.Attribute;
 import org.apache.directory.api.ldap.model.entry.Entry;
+import org.apache.directory.api.ldap.model.entry.Value;
 import org.apache.directory.api.ldap.model.exception.LdapException;
 import org.apache.directory.api.ldap.model.message.SearchScope;
 import org.apache.directory.ldap.client.api.LdapNetworkConnection;
@@ -25,42 +27,39 @@ import org.yaml.snakeyaml.Yaml;
 import java.io.FileInputStream;
 import java.io.InputStream;
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.Map;
 import java.util.Properties;
 
-@Plugin(service="ResourceModelSource",name="ldapresources")
-public class LdapresourcesFactory implements ResourceModelSourceFactory, Describable{
+@Plugin(service = "ResourceModelSource", name = "ldapresources")
+public class LdapresourcesFactory implements ResourceModelSourceFactory, Describable {
 
     public static final Logger logger = Logger.getLogger(LdapresourcesFactory.class);
 
     public static final String PROVIDER_NAME = "ldapresources";
     public static final String PROVIDER_TITLE = "LDAP Resource Model";
-    public static final String PROVIDER_DESCRIPTION ="LDAP Resource Model ";
+    public static final String PROVIDER_DESCRIPTION = "LDAP Resource Model ";
 
-   /**
-     * Overriding this method gives the plugin a chance to take part in building the {@link
-     * com.dtolabs.rundeck.core.plugins.configuration.Description} presented by this plugin.  This subclass can use the
-     * {@link DescriptionBuilder} to modify all aspects of the description, add or remove properties, etc.
+    /**
+     * Overriding this method gives the plugin a chance to take part in building the
+     * {@link com.dtolabs.rundeck.core.plugins.configuration.Description} presented
+     * by this plugin. This subclass can use the {@link DescriptionBuilder} to
+     * modify all aspects of the description, add or remove properties, etc.
      */
     @Override
     public Description getDescription() {
-        return DescriptionBuilder.builder()
-                           .name(PROVIDER_NAME)
-                           .title(PROVIDER_TITLE)
-                           .description(PROVIDER_DESCRIPTION)
-                           .property(
-                                PropertyUtil.string("ldapConfigFile", "LDAP Configuration file", "Config file.", false,
-                                        null, null, null, null
-                                    )
-                           )
-                           .build();
+        return DescriptionBuilder.builder().name(PROVIDER_NAME).title(PROVIDER_TITLE).description(PROVIDER_DESCRIPTION)
+                .property(PropertyUtil.string("ldapConfigFile", "LDAP Configuration file", "Config file.", false, null,
+                        null, null, null))
+                .build();
     }
 
-   /**
-     * Here is the meat of the plugin implementation, which should perform the appropriate logic for your plugin.
+    /**
+     * Here is the meat of the plugin implementation, which should perform the
+     * appropriate logic for your plugin.
      */
     @Override
     public ResourceModelSource createResourceModelSource(final Properties properties) throws ConfigurationException {
@@ -68,7 +67,7 @@ public class LdapresourcesFactory implements ResourceModelSourceFactory, Describ
         return resource;
     }
 
-    class LDAPresources implements ResourceModelSource{
+    class LDAPresources implements ResourceModelSource {
 
         private final Properties configuration;
         private final Map ldapConfig;
@@ -94,7 +93,7 @@ public class LdapresourcesFactory implements ResourceModelSourceFactory, Describ
 
         @Override
         public INodeSet getNodes() throws ResourceModelSourceException {
-            
+
             final NodeSetImpl nodeSet = new NodeSetImpl();
 
             String user = (String) this.ldapConfig.get("user");
@@ -103,20 +102,19 @@ public class LdapresourcesFactory implements ResourceModelSourceFactory, Describ
             Integer port = (Integer) this.ldapConfig.get("port");
             String userdn = String.format("cn=%s,ou=users,dc=cern,dc=ch", user);
             String entities_base = (String) this.ldapConfig.get("entities_base");
-    
+
             try {
 
                 logger.error("LDAP Connection to " + url + ":" + port);
                 LdapNetworkConnection connection = new LdapNetworkConnection(url, port, true);
-    
-                logger.error("Bind: "+ this.ldapConfig.get("userdn"));
+
+                logger.error("Bind: " + this.ldapConfig.get("userdn"));
                 connection.bind(userdn, password);
-    
+
                 logger.error("Searching: " + this.ldapConfig.get("search_base"));
                 String filter = (String) this.ldapConfig.get("filter");
                 EntryCursor entities = connection.search(entities_base, filter, SearchScope.SUBTREE, "*");
-    
-                Integer total = 0;
+
                 // Main entities iteration loop
                 while (entities.next()) {
                     Entry entity = entities.get();
@@ -127,26 +125,29 @@ public class LdapresourcesFactory implements ResourceModelSourceFactory, Describ
                     if (null == node.getAttributes()) {
                         node.setAttributes(new HashMap<>());
                     }
-                    HashMap<String,String> nodeAttributes = (HashMap<String,String>) node.getAttributes();
-
-                    node.setNodename(entity.get((String) this.ldapConfig.get("name_attribute")).toString());
-                    node.setUsername(entity.get((String) this.ldapConfig.get("user_attribute")).toString());
-                    
-                    //node.setHostname("localhost");
-    
-                    // Selected attributes
-                    ArrayList<String> selected_attributes = (ArrayList<String>) this.ldapConfig.getOrDefault("entity_node_attributes", new ArrayList<String>());
+                    HashMap<String, String> nodeAttributes = (HashMap<String, String>) node.getAttributes();
                     HashSet<String> tagset = new HashSet<>();
-                    for(String attribute: selected_attributes) {
-                        logger.error(entity.get(attribute.toString()));
-                        //nodeAttributes.put(attribute, entity.get(attribute).toString());
-                        ArrayList<String> tag_attributes = (ArrayList<String>) this.ldapConfig.getOrDefault("tag_attributes", new ArrayList<String>());
-                        if (tag_attributes.contains(attribute)) {
-                            tagset.add(attribute);
+
+                    node.setNodename(entity.get((String) this.ldapConfig.get("name_attribute")).get().toString());
+                    node.setUsername(entity.get((String) this.ldapConfig.get("user_attribute")).get().toString());
+
+                    // node.setHostname("localhost");
+
+                    Collection<Attribute> entityAttributes = entity.getAttributes();
+
+                    // Process attributes
+                    ArrayList<String> selected_attributes = (ArrayList<String>) this.ldapConfig.getOrDefault("entity_node_attributes", new ArrayList<String>());
+                    ArrayList<String> tag_attributes = (ArrayList<String>) this.ldapConfig.getOrDefault("tag_attributes", new ArrayList<String>());
+                    for (Attribute attribute : entityAttributes) {
+                        logger.error("Attr: " + attribute.getId());
+                        Value attrValue = attribute.get();
+                        if (selected_attributes.contains(attribute.getId())) {
+                            nodeAttributes.put(attribute.getId(), attribute.get().toString());
+                        }
+                        if (tag_attributes.contains(attribute.getId())) {
+                            tagset.add(attribute.get().toString());
                         }
                     }
-                    tagset.add("ldap");
-                    if (! tagset.isEmpty()) node.setTags(tagset);
     
                     // Sub nodes
                     Map<String, Map<String,String>> sub_nodes = (Map<String, Map<String,String>>) this.ldapConfig.getOrDefault("entity_subnodes", Collections.emptyList());
@@ -173,11 +174,12 @@ public class LdapresourcesFactory implements ResourceModelSourceFactory, Describ
                         }
                     
                     });
-
-                    node.setAttribute("id", total.toString());
+                    
+                    // Complete node and register to nodeSet
+                    tagset.add("ldap");
+                    if (! tagset.isEmpty()) node.setTags(tagset);
                     node.setAttributes(nodeAttributes);
                     nodeSet.putNode(node);
-                    total++;
                     
                 }
     
