@@ -20,8 +20,11 @@ import org.apache.directory.api.ldap.model.entry.Entry;
 import org.apache.directory.api.ldap.model.entry.Value;
 import org.apache.directory.api.ldap.model.exception.LdapException;
 import org.apache.directory.api.ldap.model.message.SearchScope;
+import org.apache.directory.api.ldap.model.exception.LdapInvalidAttributeValueException;
 import org.apache.directory.ldap.client.api.LdapNetworkConnection;
 import org.apache.log4j.Logger;
+import org.json.JSONArray;
+import org.json.JSONObject;
 import org.yaml.snakeyaml.Yaml;
 
 import java.io.FileInputStream;
@@ -101,7 +104,8 @@ public class LdapresourcesFactory implements ResourceModelSourceFactory, Describ
             String url = (String) this.ldapConfig.get("url");
             Integer port = (Integer) this.ldapConfig.get("port");
             String userdn = String.format("cn=%s,ou=users,dc=cern,dc=ch", user);
-            String entities_base = (String) this.ldapConfig.get("entities_base");
+            String search_base = (String) this.ldapConfig.get("search_base");
+            String filter = (String) this.ldapConfig.get("filter");
 
             try {
 
@@ -111,9 +115,8 @@ public class LdapresourcesFactory implements ResourceModelSourceFactory, Describ
                 logger.error("Bind: " + this.ldapConfig.get("userdn"));
                 connection.bind(userdn, password);
 
-                logger.error("Searching: " + this.ldapConfig.get("search_base"));
-                String filter = (String) this.ldapConfig.get("filter");
-                EntryCursor entities = connection.search(entities_base, filter, SearchScope.SUBTREE, "*");
+                logger.error("Searching: " + search_base);
+                EntryCursor entities = connection.search(search_base, filter, SearchScope.SUBTREE, "*");
 
                 // Main entities iteration loop
                 while (entities.next()) {
@@ -130,44 +133,69 @@ public class LdapresourcesFactory implements ResourceModelSourceFactory, Describ
 
                     node.setNodename(entity.get((String) this.ldapConfig.get("name_attribute")).get().toString());
                     node.setUsername(entity.get((String) this.ldapConfig.get("user_attribute")).get().toString());
+                    node.setOsName(entity.get((String) this.ldapConfig.get("os_attribute")).get().toString());
 
                     // node.setHostname("localhost");
 
                     Collection<Attribute> entityAttributes = entity.getAttributes();
 
-                    // Process attributes
+                    // Process Entity base level attributes
                     ArrayList<String> selected_attributes = (ArrayList<String>) this.ldapConfig.getOrDefault("entity_node_attributes", new ArrayList<String>());
                     ArrayList<String> tag_attributes = (ArrayList<String>) this.ldapConfig.getOrDefault("tag_attributes", new ArrayList<String>());
                     for (Attribute attribute : entityAttributes) {
                         logger.error("Attr: " + attribute.getId());
                         Value attrValue = attribute.get();
                         if (selected_attributes.contains(attribute.getId())) {
+                            // If attribute in entity_node_attributes list, add as node attribute
                             nodeAttributes.put(attribute.getId(), attribute.get().toString());
                         }
                         if (tag_attributes.contains(attribute.getId())) {
+                            // If attribute in tag_attribute list, resgister value as tag
                             tagset.add(attribute.get().toString());
                         }
                     }
     
-                    // Sub nodes
+                    // Entity Sub nodes
                     Map<String, Map<String,String>> sub_nodes = (Map<String, Map<String,String>>) this.ldapConfig.getOrDefault("entity_subnodes", Collections.emptyList());
     
-                    sub_nodes.forEach((key,value) -> {
+                    sub_nodes.forEach((subNodeName, subNodeParams) -> {
                         
-                        logger.debug(String.format("%s: %s", key, value.toString()));
+                        logger.debug(String.format("%s: %s", subNodeName, subNodeParams.toString()));
     
-                        String sc_category = value.get("sc-category");
-                        String objectclass = value.get("objectclass");
+                        String search_attribute = subNodeParams.get(this.ldapConfig.get("search_attribute"));
+                        String objectclass = subNodeParams.get("objectclass");
     
-                        String search_base = String.format("sc-category=%s,", sc_category) + entity.getDn();
+                        String searchBase = String.format("sc-category=%s,", search_attribute) + entity.getDn();
                         String search_filter = String.format("(objectClass=%s)", objectclass);
-                        logger.debug("search_base=" + search_base);
-                        EntryCursor subNodeEntities;
+                        logger.debug("search_base=" + searchBase);
+                        EntryCursor subNodeEntries;
+
                         try {
-                            subNodeEntities = connection.search(search_base, search_filter, SearchScope.SUBTREE, "*");
-                            subNodeEntities.forEach((subNode) -> {
-                                logger.info(key + ":" + subNode.getDn());
-                            });
+
+                            subNodeEntries = connection.search(searchBase, search_filter, SearchScope.SUBTREE, "*");
+                            
+                            JSONObject json = new JSONObject();
+                            JSONArray jArray = new JSONArray();
+
+                            subNodeEntries.forEach((entry) -> {
+
+                                logger.info("SubNodeEntities: " + subNodeName + ":" + entry.getDn());
+
+                                entry.getAttributes().forEach((attribute -> {
+                                    try {
+                                        json.put(attribute.getId(), attribute.getString());
+                                    } catch (LdapInvalidAttributeValueException e) {
+                                        // TODO Auto-generated catch block
+                                        e.printStackTrace();
+                                    }
+                                })); // End subNode attribute loop
+                            
+                                jArray.put(json);
+
+                            }); // End subNodeEntries subNode loop
+
+                            if (jArray.length() > 0) nodeAttributes.put(subNodeName, jArray.toString());
+                            
                         } catch (LdapException e) {
                             logger.error("Error querying entity sub-nodes");
                             logger.error(e.getMessage());
@@ -176,14 +204,13 @@ public class LdapresourcesFactory implements ResourceModelSourceFactory, Describ
                     });
                     
                     // Complete node and register to nodeSet
-                    tagset.add("ldap");
+                    tagset.add("ldap8");
                     if (! tagset.isEmpty()) node.setTags(tagset);
                     node.setAttributes(nodeAttributes);
                     nodeSet.putNode(node);
                     
                 }
     
-                logger.error("Total: " + total.toString());
                 logger.error("Unbinding");
                 connection.unBind();
     
