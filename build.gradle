@@ -10,9 +10,8 @@ apply plugin: 'groovy'
 apply plugin: 'idea'
 sourceCompatibility = 1.8
 ext.rundeckPluginVersion= '2.0'
-ext.rundeckVersion= '3.0.x'
+ext.rundeckVersion= '3.1.x'
 ext.pluginClassNames='com.plugin.ldapresources.LdapresourcesFactory'
-
 
 repositories {
     mavenLocal()
@@ -56,6 +55,13 @@ dependencies {
 task copyToLib(type: Copy) {
     into "$buildDir/output/lib"
     from configurations.pluginLibs
+}
+
+// task to copy to local Rundeck plugin folder
+def localLibExt = '/home/icoteril/workspace/rundeck3/libext'
+task deployLocal(type: Copy) {
+    from "$buildDir/libs"
+    into localLibExt
 }
 
 jar {
